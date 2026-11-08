@@ -4,15 +4,32 @@ Paste a YouTube link and get study notes you can read instead of watching the wh
 
 A personal project: FastAPI + SQLite + plain HTML/JS, one Docker container, one OpenAI call per video.
 
-![Result page](screenshots/result.png)
+![Summary and key takeaways](screenshots/result-summary.png)
 
 ## Screenshots
+
+### A finished result
+
+Each video becomes four sections, shown live as the model writes them. This example is an 18-minute talk.
+
+**1. Summary** with key takeaways (above), then **2. Audience fit** and the start of **3. Notes**, which opens with a glossary:
+
+![Audience fit and glossary](screenshots/result-audience.png)
+
+**3. Notes**: every section has a one-line "why it matters" and short bullets:
+
+![Notes](screenshots/result-notes.png)
+
+**4. Quiz**: multiple choice, tap a question to reveal the answer (correct option marked):
+
+![Quiz](screenshots/result-quiz.png)
+
+### Around the app
 
 | | |
 |---|---|
 | **Home**: paste a link ![Home](screenshots/home.png) | **Library**: past videos, search, sort ![Library](screenshots/library.png) |
-| **Notes**: glossary, then per-section "why" and bullets ![Notes](screenshots/notes.png) | **Quiz**: tap a question to reveal the answer ![Quiz](screenshots/quiz.png) |
-| **Errors**: inline, with plain wording ![Bad URL](screenshots/error-bad-url.png) | **Login**: only accounts you list can enter ![Login](screenshots/login.png) |
+| **Errors**: inline, plain wording ![Bad URL](screenshots/error-bad-url.png) | **Login**: only accounts you list can enter ![Login](screenshots/login.png) |
 
 ## What it does
 
