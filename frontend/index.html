@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Buddy</title>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#0f0f0f; --red:#ff0000; --err:#b3261e; --errbg:#fdeceb; --mute:#555; --line:#d4d7db; --bg:#f9f9f9; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:Roboto,sans-serif; font-size:14px; color:var(--ink); background:var(--bg); line-height:1.25; }
+  h1,h2,h3 { margin:0; font-weight:700; letter-spacing:-.01em; }
+  small, .mute { font-size:12px; color:var(--mute); }
+  .app { display:flex; min-height:100vh; }
+  .sb { width:190px; flex:none; border-right:2px solid var(--ink); padding:16px 14px; display:flex; flex-direction:column; gap:10px; position:sticky; top:0; height:100vh; }
+  .sb .brand { font-size:24px; font-weight:700; margin-bottom:6px; }
+  .sb a { padding:6px 8px; border:1.5px solid transparent; color:var(--ink); text-decoration:none; cursor:pointer; display:block; }
+  .sb a.on { border-color:var(--ink); background:#f2f2f2; }
+  .sb .label { margin-top:8px; font-size:11px; color:var(--mute); }
+  .sb .grow { flex:1; }
+  main { flex:1; padding:22px 26px; min-width:0; max-width:1000px; display:flex; flex-direction:column; gap:16px; }
+  .bx { border:2px solid var(--ink); background:#fff; padding:10px 12px; }
+  .bx.err { border-color:var(--err); background:var(--errbg); }
+  .dash { border:2px dashed #888; background:#fff; }
+  .ph { background:repeating-linear-gradient(45deg,#e6e8eb,#e6e8eb 6px,#f1f2f4 6px,#f1f2f4 12px); border:2px solid var(--ink); display:flex; align-items:center; justify-content:center; color:var(--mute); font-size:12px; flex:none; }
+  button, .btn { font:inherit; border:2px solid var(--ink); background:#fff; padding:6px 14px; cursor:pointer; color:var(--ink); display:inline-block; text-decoration:none; }
+  button.primary, .btn.primary { background:var(--red); color:#fff; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  input[type=text] { font:inherit; border:2px solid var(--ink); padding:10px 12px; width:100%; background:#fff; }
+  input[type=text].bad { border-color:var(--err); }
+  .row { display:flex; gap:10px; align-items:center; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  .card { cursor:pointer; padding:8px; }
+  .card:hover { background:#fafafa; }
+  .sec { border-top:2px solid var(--ink); padding-top:10px; margin-top:6px; font-size:26px; }
+  .ln { height:9px; background:var(--line); border-radius:2px; margin:8px 0; }
+  .bar { height:16px; border:2px solid var(--ink); background:#fff; }
+  .bar > div { height:100%; background:var(--red); transition:width .4s; }
+  .steps div { padding:2px 0; }
+  .steps .todo { color:#888; }
+  .errtext { color:var(--err); font-size:13px; margin-top:6px; }
+  details { border:2px solid var(--ink); background:#fff; padding:8px 12px; margin-bottom:6px; }
+  summary { cursor:pointer; }
+  .ans { margin-top:6px; color:#cc0000; }
+  .tag { border:1px solid var(--ink); padding:0 5px; font-size:11px; margin-right:4px; }
+  .cols { display:flex; gap:12px; }
+  .cols > .bx { flex:1; }
+  table { border-collapse:collapse; margin:8px 0; font-size:13px; }
+  th, td { border:1.5px solid var(--ink); padding:4px 8px; text-align:left; vertical-align:top; }
+  th { background:#f2f2f2; }
+  .caveat { border-left:4px solid var(--err); background:var(--errbg); padding:6px 10px; margin-top:8px; }
+  .tag { text-transform:capitalize; }
+  .hidden { display:none !important; }
+  @media (max-width:760px) {
+    .app { flex-direction:column; }
+    .sb { width:auto; height:auto; position:static; flex-direction:row; flex-wrap:wrap; align-items:center; border-right:0; border-bottom:2px solid var(--ink); }
+    .sb .grow, .sb .label { display:none; }
+    .grid, .cols { grid-template-columns:1fr; flex-direction:column; }
+    main { padding:16px; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <nav class="sb" id="sb"></nav>
+  <main id="main"></main>
+</div>
+
+<script>
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const YT_RE = /^(https?:\/\/)?(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w-]{6,}/i;
+
+let library = [];
+
+const ERR_MSG = {
+  no_captions: "This video has no captions, so I can't read it.",
+  unavailable: "Can't open this video — it may be private, removed or region-blocked.",
+  too_long: "This transcript is too long for the model to read in one go.",
+  generation_failed: "Something went wrong while generating. What arrived is saved.",
+};
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (res.status === 401) { location.href = "/login"; throw new Error("unauthorized"); }
+  if (!res.ok) {
+    let code = null;
+    try { code = (await res.json()).detail?.code; } catch {}
+    throw Object.assign(new Error("HTTP " + res.status), { code });
+  }
+  return res.json();
+}
+async function loadLibrary() {
+  try { library = await api("/videos"); } catch { library = []; }
+}
+function thumb(v, style, label = "thumb") {
+  return v.thumbnail_url
+    ? `<img src="${esc(v.thumbnail_url)}" alt="" style="${style};object-fit:cover;border:2px solid var(--ink);flex:none">`
+    : `<div class="ph" style="${style}">${label}</div>`;
+}
+function ago(ts) {
+  if (!ts) return "";
+  const d = (Date.now() - new Date(ts.replace(" ", "T") + "Z")) / 86400000;
+  if (d < 1) return "today";
+  if (d < 7) return Math.floor(d) + "d ago";
+  return Math.floor(d / 7) + "w ago";
+}
+function j(x, fb) { try { return x ? JSON.parse(x) : fb; } catch { return fb; } }
+function fmtDur(s) { if (!s) return "–:–"; const m = Math.floor(s / 60); return m + ":" + String(s % 60).padStart(2, "0"); }
+
+/* ---------- sidebar ---------- */
+function sidebar(active, video) {
+  let h = `<div class="brand">AI Buddy</div>`;
+  if (video) {
+    h += `<a href="#/library">← Library</a><div class="label">ON THIS VIDEO</div>
+      ${["Summary","Audience fit","Notes","Quiz"].map((t,i)=>`<a href="#sec${i+1}" data-sec="${i+1}" class="${i===0?"on":""}">${i+1} ${t}</a>`).join("")}
+      <div class="grow"></div>
+      <button id="copy">Copy notes</button><button id="rerun">Re-run</button>`;
+  } else {
+    h += `<a href="#/new" class="${active==="new"?"on":""}">+ New video</a>
+          <a href="#/library" class="${active==="library"?"on":""}">Library <small>(${library.length})</small></a>`;
+  }
+  h += `<a href="#" id="logout" style="margin-top:${video ? 4 : 12}px"><small>Log out</small></a>`;
+  $("#sb").innerHTML = h;
+  $("#logout").onclick = async e => { e.preventDefault(); try { await fetch("/auth/logout", { method: "POST" }); } catch {} location.href = "/login"; };
+}
+
+/* ---------- 1a input (+ 1f errors) ---------- */
+function viewNew(prefill = "", error = null) {
+  sidebar("new");
+  const recent = library.slice(0, 2).map(v => `
+    <div class="bx card row" data-id="${v.id}" style="flex:1;gap:8px">
+      ${thumb(v, "width:70px;height:40px")}
+      <div>${esc(v.title || "Untitled")}<br><small>${ago(v.created_at)}</small></div>
+    </div>`).join("");
+  $("#main").innerHTML = `
+    <div style="margin-top:40px">
+      <h1 style="font-size:40px">What are we watching?</h1>
+      <div>Paste a YouTube link. Get a summary, who it's for, notes and a quiz.</div>
+    </div>
+    <form id="f" class="row" novalidate>
+      <input type="text" id="url" placeholder="https://youtube.com/watch?v=…" value="${esc(prefill)}" class="${error?.kind==="url"?"bad":""}">
+      <button class="primary" type="submit" style="white-space:nowrap">Analyse →</button>
+    </form>
+    ${error?.kind==="url" ? `<div class="errtext">That doesn't look like a YouTube link. Try one like youtube.com/watch?v=…</div>` : ""}
+    ${error?.kind==="fail" ? `<div class="bx err">${esc(error.msg)} <a href="#" id="dismiss">Dismiss</a></div>` : ""}
+    <small>Needs a video with captions</small>
+    ${recent ? `<div><div style="margin-bottom:6px">Recent</div><div class="row" style="align-items:stretch">${recent}</div></div>` : ""}`;
+  $("#f").addEventListener("submit", e => { e.preventDefault(); submit($("#url").value.trim()); });
+  $("#dismiss")?.addEventListener("click", e => { e.preventDefault(); viewNew(); });
+  document.querySelectorAll(".card").forEach(c => c.onclick = () => location.hash = "#/video/" + c.dataset.id);
+}
+
+/* ---------- view model ---------- */
+const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+function fromRow(v) {
+  const notes = j(v.notes, {});
+  return { id: v.id, url: v.url, title: v.title, channel: v.channel, thumbnail_url: v.thumbnail_url,
+    duration_sec: v.duration_sec, updated_at: v.updated_at, status: v.status,
+    error: v.status === "error" ? (v.error_message || "generation_failed") : null,
+    level: v.level, verdict: v.verdict, tldr: v.tldr,
+    chapters: j(v.chapters, []), glossary: notes.glossary || [], takeaways: notes.takeaways || [], quiz: j(v.quiz, []) };
+}
+function lastChapter(m) {
+  if (!m.chapters.length) m.chapters.push({ title: "", why: "", notes: [], table: null, caveat: null });
+  return m.chapters[m.chapters.length - 1];
+}
+function applyLine(m, o) {
+  const v = o.value;
+  switch (o.type) {
+    case "glossary": m.glossary = Array.isArray(v) ? v : []; break;
+    case "chapter_title": m.chapters.push({ title: v || "", why: "", notes: [], table: null, caveat: null }); break;
+    case "chapter_why": lastChapter(m).why = v || ""; break;
+    case "chapter_notes": lastChapter(m).notes = Array.isArray(v) ? v : []; break;
+    case "chapter_table": lastChapter(m).table = v && typeof v === "object" ? v : null; break;
+    case "chapter_caveat": lastChapter(m).caveat = v || ""; break;
+    case "level": m.level = String(v || "").toLowerCase(); break;
+    case "verdict": m.verdict = String(v || "").toLowerCase(); break;
+    case "tldr": m.tldr = v; break;
+    case "takeaways": m.takeaways = Array.isArray(v) ? v : []; break;
+    case "quiz": m.quiz = Array.isArray(v) ? v : []; break;
+    case "error": m.error = o.message || o.code; break;
+  }
+}
+
+/* ---------- 1b processing + live streaming ---------- */
+async function submit(url) {
+  if (!YT_RE.test(url)) return viewNew(url, { kind: "url" });
+  sidebar("new");
+  const ctrl = new AbortController();
+  $("#main").innerHTML = `
+    <div class="bx row" style="gap:14px;margin-top:20px">
+      <div class="ph" style="width:200px;height:112px">thumbnail</div>
+      <div><h2 style="font-size:26px">Fetching the transcript…</h2><small>${esc(url)}</small></div>
+    </div>
+    <div class="bar"><div style="width:15%"></div></div>
+    <div><button id="cancel">Cancel</button></div>`;
+  $("#cancel").onclick = () => { ctrl.abort(); viewNew(url); };
+
+  let res;
+  try {
+    res = await fetch("/analyze", { method: "POST", signal: ctrl.signal,
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    return viewNew(url, { kind: "fail", msg: "Can't reach the server." });
+  }
+  if (res.status === 401) { location.href = "/login"; return; }
+  if (!res.ok) {
+    let d = null; try { d = (await res.json()).detail; } catch {}
+    if (d?.code === "invalid_url") return viewNew(url, { kind: "url" });
+    return viewNew(url, { kind: "fail", msg: d?.message || ERR_MSG[d?.code] || "Something went wrong." });
+  }
+
+  const m = { id: null, url, title: "", channel: null, thumbnail_url: null, duration_sec: null, status: "processing",
+    error: null, level: null, verdict: null, tldr: null, chapters: [], glossary: [], takeaways: [], quiz: [] };
+  let queued = false;
+  const paint = () => {
+    if (queued) return; queued = true;
+    requestAnimationFrame(() => { queued = false; renderVideo(m, { live: true, cancel: () => ctrl.abort() }); });
+  };
+
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "", finished = false;
+  const handle = line => {
+    if (!line.trim()) return;
+    let o; try { o = JSON.parse(line); } catch { return; }
+    if (o.type === "meta") { Object.assign(m, o); history.replaceState(null, "", "#/video/" + o.id); }
+    else if (o.type === "done") { finished = true; m.status = "done"; }
+    else applyLine(m, o);
+    paint();
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) { handle(buf.slice(0, i)); buf = buf.slice(i + 1); }
+    }
+    handle(buf);
+  } catch (e) {
+    if (e.name !== "AbortError") m.error = m.error || "Connection lost while generating.";
+  }
+  if (!finished) { m.status = "error"; m.error = m.error || "generation_failed"; }
+  await loadLibrary();
+  renderVideo(m, { live: false });
+}
+
+/* ---------- 1c result ---------- */
+async function viewVideo(id) {
+  let v;
+  try { v = await api("/videos/" + id); } catch { return viewNew("", { kind: "fail", msg: "Can't open this video — it may have been removed." }); }
+  renderVideo(fromRow(v), { live: false });
+}
+
+function notesAsText(m) {
+  const out = [];
+  if (m.glossary.length) out.push("# Glossary", ...m.glossary.map(g => `- **${g.term}**: ${g.definition}`), "");
+  for (const c of m.chapters) {
+    out.push(`## ${c.title}`);
+    if (c.why) out.push(`_${c.why}_`);
+    out.push(...(c.notes || []).map(n => `- ${n}`));
+    if (c.table?.headers?.length) {
+      out.push("", "| " + c.table.headers.join(" | ") + " |", "|" + c.table.headers.map(() => "---").join("|") + "|",
+        ...(c.table.rows || []).map(r => "| " + r.join(" | ") + " |"));
+    }
+    if (c.caveat) out.push(`> ⚠ ${c.caveat}`);
+    out.push("");
+  }
+  return out.join("\n").trim();
+}
+
+function renderVideo(m, { live, cancel }) {
+  sidebar(null, m);
+  const wait = live ? `<div class="mute">…</div>` : `<div class="mute">—</div>`;
+  let banner = "";
+  if (live) {
+    const pct = Math.min(95, 10 + m.chapters.length * 6 + (m.level ? 15 : 0) + (m.tldr ? 5 : 0) + (m.quiz.length ? 15 : 0));
+    banner = `<div class="bx row" style="gap:12px"><div class="bar" style="flex:1"><div style="width:${pct}%"></div></div><span>Generating live…</span><button id="stop">Stop</button></div>`;
+  } else if (m.error) {
+    banner = `<div class="bx err">${esc(ERR_MSG[m.error] || m.error)} ${m.chapters.length ? "What arrived is saved below." : ""} <button id="retry">Retry</button></div>`;
+  }
+
+  const chapters = m.chapters.map(c => `
+    <div class="bx">
+      <h3 style="font-size:18px">${esc(c.title)}</h3>
+      ${c.why ? `<div class="mute" style="margin:4px 0 8px;font-style:italic">${esc(c.why)}</div>` : ""}
+      ${c.content ? `<div style="margin:4px 0 8px">${esc(c.content)}</div>` : ""}
+      ${c.notes?.length ? `<ul style="margin:6px 0 6px;padding-left:20px">${c.notes.map(n => `<li style="margin:3px 0">${esc(n)}</li>`).join("")}</ul>` : ""}
+      ${c.table?.headers?.length ? `<div style="overflow:auto"><table><thead><tr>${c.table.headers.map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+        <tbody>${(c.table.rows || []).map(r => `<tr>${r.map(x => `<td>${esc(x)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : ""}
+      ${c.caveat ? `<div class="caveat">⚠ ${esc(c.caveat)}</div>` : ""}
+    </div>`).join("");
+
+  $("#main").innerHTML = `
+    <div class="row" style="gap:14px;align-items:flex-start">
+      ${thumb(m, "width:220px;height:124px", "thumbnail ▶")}
+      <div><h1 style="font-size:32px">${esc(m.title || "Untitled video")}</h1>
+        <small>${esc(m.channel || "Channel")} · ${fmtDur(m.duration_sec)}${m.updated_at ? ` · analysed ${ago(m.updated_at)}` : ""} · <a href="${esc(m.url)}" target="_blank" rel="noopener">open on YouTube ↗</a></small></div>
+    </div>
+    ${banner}
+    <h2 class="sec" id="sec1">1 Summary</h2>
+    <div class="bx">
+      ${m.tldr ? `<div>${esc(m.tldr)}</div>` : (live ? `<div class="ln"></div><div class="ln" style="width:60%"></div>` : wait)}
+      ${m.takeaways.length ? `<div style="margin-top:12px"><b>Key takeaways</b><ol style="margin:6px 0 0;padding-left:20px">${m.takeaways.map(t => `<li style="margin:3px 0">${esc(t)}</li>`).join("")}</ol></div>` : ""}
+    </div>
+    <h2 class="sec" id="sec2">2 Audience fit</h2>
+    <div class="cols">
+      <div class="bx"><b>Level</b><div>${m.level ? esc(cap(m.level)) : wait}</div></div>
+      <div class="bx"><b>Should you watch it?</b><div>${m.verdict ? `<b>${esc(cap(m.verdict))}</b>` : wait}</div></div>
+    </div>
+    <h2 class="sec" id="sec3">3 Notes</h2>
+    ${m.glossary.length ? `<div class="bx"><b>Glossary</b><dl style="margin:6px 0 0">${m.glossary.map(g =>
+      `<dt style="font-weight:700;margin-top:6px">${esc(g.term)}${g.chapter ? ` <small>· ${esc(g.chapter)}</small>` : ""}</dt><dd style="margin:2px 0 0 0">${esc(g.definition)}</dd>`).join("")}</dl></div>` : ""}
+    ${chapters || `<div class="bx">${wait}</div>`}
+    <h2 class="sec" id="sec4">4 Quiz <small>${m.quiz.length} questions · tap to reveal</small></h2>
+    <div>${m.quiz.length ? m.quiz.map((q, i) => `
+      <details><summary>Q${i + 1}. ${esc(q.question || q.q || "")}</summary>
+        ${q.options?.length ? `<ol type="A" style="margin:8px 0 0;padding-left:22px">${q.options.map((o, k) =>
+          `<li style="margin:3px 0;${k === q.answer_index ? "color:#0a7d33;font-weight:700" : ""}">${esc(o)}${k === q.answer_index ? " ✓" : ""}</li>`).join("")}</ol>` : `<div class="ans">A: ${esc(q.a || "")}</div>`}
+      </details>`).join("") : wait}</div>`;
+
+  $("#stop")?.addEventListener("click", () => cancel?.());
+  $("#retry")?.addEventListener("click", () => submit(m.url));
+  const copy = $("#copy");
+  if (copy) copy.onclick = async () => {
+    try { await navigator.clipboard.writeText(notesAsText(m) || "(no notes yet)"); copy.textContent = "Copied ✓"; } catch { copy.textContent = "Copy failed"; }
+    setTimeout(() => { const b = $("#copy"); if (b) b.textContent = "Copy notes"; }, 1500);
+  };
+  const rr = $("#rerun"); if (rr) rr.onclick = () => submit(m.url);
+  document.querySelectorAll("[data-sec]").forEach(a => a.onclick = e => {
+    e.preventDefault();
+    $("#sec" + a.dataset.sec).scrollIntoView({ behavior: "smooth" });
+    document.querySelectorAll("[data-sec]").forEach(x => x.classList.toggle("on", x === a));
+  });
+}
+
+/* ---------- 1d library / 1e empty ---------- */
+let search = "", sort = "new";
+function viewLibrary() {
+  sidebar("library");
+  if (!library.length) {
+    $("#main").innerHTML = `<h1 style="font-size:34px">Library</h1>
+      <div class="dash" style="flex:1;min-height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:20px">
+        <h2 style="font-size:28px">Nothing here yet</h2>
+        <div>Videos you analyse will live here so you can come back to them.</div>
+        <a class="btn primary" href="#/new">Paste your first link →</a></div>`;
+    return;
+  }
+  const items = library
+    .filter(v => ((v.title || "") + v.url).toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => sort === "new" ? b.id - a.id : a.id - b.id);
+  $("#main").innerHTML = `
+    <div class="row"><h1 style="font-size:34px;flex:1">Library</h1>
+      <input type="text" id="q" placeholder="🔍 search" value="${esc(search)}" style="width:200px;padding:4px 10px">
+      <button id="sort">${sort === "new" ? "Newest ▾" : "Oldest ▾"}</button></div>
+    <div class="grid">${items.map(v => {
+      const bad = v.status === "error";
+      return `<div class="bx card ${bad ? "err" : ""}" data-id="${v.id}">
+        ${thumb(v, "width:100%;height:90px")}
+        <div style="margin-top:6px">${esc(v.title || "Untitled")}</div>
+        <small>${esc(v.channel || "Channel")} · ${fmtDur(v.duration_sec)} · ${ago(v.updated_at)}</small><br>${bad ? `<small>${esc(v.error_message || "Failed")}</small><br>` : ""}
+        ${v.level ? `<span class="tag">${esc(v.level)}</span>` : ""}${v.verdict ? `<span class="tag">${esc(v.verdict)}</span>` : ""}
+        <div><small><a href="#" data-del="${v.id}">delete</a></small></div></div>`; }).join("")}</div>
+    ${items.length ? "" : `<div class="mute">No videos match “${esc(search)}”.</div>`}`;
+  $("#q").oninput = e => { search = e.target.value; const p = e.target.selectionStart; viewLibrary(); const q = $("#q"); q.focus(); q.setSelectionRange(p, p); };
+  $("#sort").onclick = () => { sort = sort === "new" ? "old" : "new"; viewLibrary(); };
+  document.querySelectorAll(".card").forEach(c => c.onclick = () => location.hash = "#/video/" + c.dataset.id);
+  document.querySelectorAll("[data-del]").forEach(a => a.onclick = async e => {
+    e.preventDefault(); e.stopPropagation();
+    if (!confirm("Delete this video?")) return;
+    try { await api("/videos/" + a.dataset.del, { method: "DELETE" }); } catch {}
+    await loadLibrary(); viewLibrary();
+  });
+}
+
+/* ---------- router ---------- */
+async function route() {
+  const h = location.hash || "#/new";
+  if (h.startsWith("#sec")) return;
+  await loadLibrary();
+  if (h.startsWith("#/video/")) return viewVideo(h.split("/")[2]);
+  if (h === "#/library") return viewLibrary();
+  viewNew();
+}
+window.addEventListener("hashchange", route);
+route();
+</script>
+</body>
+</html>

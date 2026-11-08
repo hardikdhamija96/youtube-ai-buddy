@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Buddy — Log in</title>
+<style>
+  body { margin:0; font-family:Roboto,system-ui,sans-serif; font-size:14px; color:#0f0f0f; background:#f9f9f9; display:flex; min-height:100vh; align-items:center; justify-content:center; }
+  form { width:min(360px,90vw); border:2px solid #0f0f0f; background:#fff; padding:24px; display:flex; flex-direction:column; gap:12px; }
+  h1 { margin:0 0 4px; font-size:28px; }
+  input { font:inherit; border:2px solid #0f0f0f; padding:10px 12px; }
+  button { font:inherit; border:2px solid #0f0f0f; background:#ff0000; color:#fff; padding:8px 14px; cursor:pointer; }
+  button:disabled { opacity:.5; }
+  .err { color:#b3261e; font-size:13px; min-height:16px; }
+  small { color:#555; }
+</style>
+</head>
+<body>
+<form id="f">
+  <h1>AI Buddy</h1>
+  <small>Private. Sign in with the account you were given.</small>
+  <input id="u" type="text" placeholder="Username" autocomplete="username" required autofocus>
+  <input id="p" type="password" placeholder="Password" autocomplete="current-password" required>
+  <div class="err" id="err"></div>
+  <button id="go" type="submit">Log in</button>
+</form>
+<script>
+document.getElementById("f").addEventListener("submit", async e => {
+  e.preventDefault();
+  const go = document.getElementById("go"), err = document.getElementById("err");
+  go.disabled = true; err.textContent = "";
+  try {
+    const res = await fetch("/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: document.getElementById("u").value, password: document.getElementById("p").value }) });
+    if (res.ok) { location.href = "/"; return; }
+    let d = null; try { d = (await res.json()).detail; } catch {}
+    err.textContent = d?.message || "Login failed.";
+  } catch { err.textContent = "Can't reach the server."; }
+  go.disabled = false;
+});
+</script>
+</body>
+</html>
